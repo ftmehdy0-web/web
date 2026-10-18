@@ -1,0 +1,81 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Change this value if the Firebase account that manages the store uses a
+    // different email address. Keep the same address in js/admin.js.
+    function isAdmin() {
+      return request.auth != null
+        && request.auth.token.email == 'admin@gmail.com';
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function ownsIncomingCustomerRecord() {
+      return isSignedIn()
+        && request.resource.data.user_uid == request.auth.uid;
+    }
+
+    function ownsStoredCustomerRecord() {
+      return isSignedIn()
+        && resource.data.user_uid == request.auth.uid;
+    }
+
+    // The catalog is public, but only the Firebase administrator can publish,
+    // edit, unpublish, or restore products.
+    match /products/{productId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Customers can create and read only their own orders; management actions
+    // (status, notes, deletion) are limited to the administrator.
+    match /orders/{orderId} {
+      allow create: if isAdmin() || ownsIncomingCustomerRecord();
+      allow read: if isAdmin() || ownsStoredCustomerRecord();
+      allow update, delete: if isAdmin();
+    }
+
+    // Customer profiles are scoped to their own Firebase UID.
+    match /users/{userId} {
+      allow create, update: if isSignedIn() && request.auth.uid == userId;
+      allow read: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+      allow delete: if isAdmin();
+    }
+
+    // Carts are keyed by Firebase UID, so the same secure policy works for
+    // email, Google, and phone-number (SMS OTP) sign-in methods.
+    match /carts/{cartId} {
+      allow create: if isAdmin() || (isSignedIn()
+        && cartId == request.auth.uid
+        && request.resource.data.ownerUid == request.auth.uid);
+      allow read, delete: if isAdmin() || (isSignedIn()
+        && cartId == request.auth.uid
+        && resource.data.ownerUid == request.auth.uid);
+      allow update: if isAdmin() || (isSignedIn()
+        && cartId == request.auth.uid
+        && resource.data.ownerUid == request.auth.uid
+        && request.resource.data.ownerUid == request.auth.uid);
+    }
+
+    // Public newsletter forms may only create a minimal, consented record.
+    // Subscriber data is never exposed to other customers.
+    match /newsletterSubscribers/{subscriberId} {
+      allow create: if request.resource.data.email is string
+        && request.resource.data.email.size() <= 254
+        && request.resource.data.consent == true;
+      allow read, update, delete: if isAdmin();
+    }
+
+    match /contactMessages/{messageId} {
+      allow create: if request.resource.data.name is string
+        && request.resource.data.email is string
+        && request.resource.data.message is string
+        && request.resource.data.name.size() <= 120
+        && request.resource.data.email.size() <= 254
+        && request.resource.data.message.size() <= 4000;
+      allow read, update, delete: if isAdmin();
+    }
+  }
+}
